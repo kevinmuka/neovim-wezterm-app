@@ -2,15 +2,15 @@ import Cocoa
 import Foundation
 
 private enum LauncherError: LocalizedError {
-   case wezTermNotFound
+   case bundledTerminalNotFound
    case neovimNotFound
    case yaziNotFound
    case pickerResourceNotFound
 
    var errorDescription: String? {
       switch self {
-      case .wezTermNotFound:
-         return "WezTerm non è installato. Installalo nella cartella Applicazioni e riprova."
+      case .bundledTerminalNotFound:
+         return "Il terminale incluso in Neovim.app non è disponibile. Reinstalla o ricompila l'app e riprova."
       case .neovimNotFound:
          return "Neovim non è stato trovato. Installalo con Homebrew (`brew install neovim`) e riprova."
       case .yaziNotFound:
@@ -28,17 +28,10 @@ private struct LaunchRequest: Codable {
 }
 
 private enum NeovimLauncher {
-   private static var wezTermCandidates: [String] {
-      let bundledHelper = Bundle.main.bundleURL
+   private static var bundledWezTerm: String {
+      Bundle.main.bundleURL
          .appendingPathComponent("Contents/Helpers/NeovimWezTermHelper.app/Contents/MacOS/wezterm-gui")
          .path
-
-      return [
-         bundledHelper,
-         "/Applications/WezTerm.app/Contents/MacOS/wezterm",
-         "/opt/homebrew/bin/wezterm",
-         "/usr/local/bin/wezterm"
-      ]
    }
 
    private static let neovimCandidates = [
@@ -53,8 +46,9 @@ private enum NeovimLauncher {
    ]
 
    static func makeRequest(paths: [String]) throws -> LaunchRequest {
-      guard let wezTerm = firstExecutable(in: wezTermCandidates) else {
-         throw LauncherError.wezTermNotFound
+      let wezTerm = bundledWezTerm
+      guard FileManager.default.isExecutableFile(atPath: wezTerm) else {
+         throw LauncherError.bundledTerminalNotFound
       }
       guard let neovim = firstExecutable(in: neovimCandidates) else {
          throw LauncherError.neovimNotFound
