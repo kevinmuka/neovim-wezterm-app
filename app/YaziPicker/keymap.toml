@@ -1,0 +1,7 @@
+[manager]
+prepend_keymap = [
+	{ on = "<Enter>", run = "quit", desc = "Conferma la cartella corrente" },
+	{ on = "<Esc>", run = "quit --no-cwd-file", desc = "Annulla" },
+	{ on = "q", run = "quit --no-cwd-file", desc = "Chiudi senza cambiare workspace" },
+	{ on = "Q", run = "quit --no-cwd-file", desc = "Chiudi senza cambiare workspace" },
+]

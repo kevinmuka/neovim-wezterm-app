@@ -1,0 +1,8 @@
+.DS_Store
+.nvimlog
+*.log
+*.dSYM/
+*.app/
+*.zip
+/app/build/
+/outputs/
