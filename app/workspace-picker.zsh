@@ -49,10 +49,15 @@ fi
 
 cd "$WORKSPACE" || exit 1
 
+if [[ -z "${NEOVIM_APP_SERVER_ADDRESS:-}" ]]; then
+   print -u2 "Il canale della sessione Neovim non è disponibile."
+   exit 1
+fi
+
 if [[ -x /opt/homebrew/bin/nvim ]]; then
-   exec /opt/homebrew/bin/nvim "$WORKSPACE"
+   exec /opt/homebrew/bin/nvim --listen "$NEOVIM_APP_SERVER_ADDRESS" "$WORKSPACE"
 elif [[ -x /usr/local/bin/nvim ]]; then
-   exec /usr/local/bin/nvim "$WORKSPACE"
+   exec /usr/local/bin/nvim --listen "$NEOVIM_APP_SERVER_ADDRESS" "$WORKSPACE"
 else
-   exec nvim "$WORKSPACE"
+   exec nvim --listen "$NEOVIM_APP_SERVER_ADDRESS" "$WORKSPACE"
 fi

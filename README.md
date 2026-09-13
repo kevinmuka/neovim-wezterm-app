@@ -7,6 +7,10 @@ anche riaprire `Neovim.app` la riporta in primo piano. Il launcher resta dietro
 le quinte e termina quando si chiude l'ultima sessione. WezTerm avviato
 normalmente rimane un'app indipendente.
 
+Aprire un file tramite `Neovim.app` mentre una sessione è già attiva riutilizza
+quella sessione, senza creare un'altra finestra. Se Yazi sta ancora scegliendo
+il workspace, il file resta in attesa finché Neovim non si avvia.
+
 Solo nella sessione Neovim, il menu e il Dock non offrono azioni per creare tab,
 finestre o split, collegarsi ad altri domini o aprire il launcher dei comandi.
 Le scorciatoie corrispondenti sono disattivate; chiudere la sessione resta

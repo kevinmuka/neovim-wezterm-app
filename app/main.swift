@@ -6,6 +6,8 @@ private enum LauncherError: LocalizedError {
    case neovimNotFound
    case yaziNotFound
    case pickerResourceNotFound
+   case serverUnavailable
+   case remoteOpenFailed
 
    var errorDescription: String? {
       switch self {
@@ -17,6 +19,10 @@ private enum LauncherError: LocalizedError {
          return "Yazi non è stato trovato."
       case .pickerResourceNotFound:
          return "Il selettore Yazi incluso nell'app non è disponibile."
+      case .serverUnavailable:
+         return "Impossibile preparare la comunicazione con Neovim. Riprova ad aprire l'app."
+      case .remoteOpenFailed:
+         return "Impossibile aprire il file nella sessione Neovim esistente."
       }
    }
 }
@@ -25,6 +31,15 @@ private struct LaunchRequest: Codable {
    let executable: String
    let arguments: [String]
    let workingDirectory: String
+}
+
+private struct ManagedSession {
+   let process: Process
+   let serverDirectory: URL
+
+   var serverAddress: String {
+      serverDirectory.appendingPathComponent("nvim.sock").path
+   }
 }
 
 private enum NeovimLauncher {
@@ -45,7 +60,7 @@ private enum NeovimLauncher {
       "/usr/local/bin/yazi"
    ]
 
-   static func makeRequest(paths: [String]) throws -> LaunchRequest {
+   static func makeRequest(paths: [String], serverAddress: String) throws -> LaunchRequest {
       let wezTerm = bundledWezTerm
       guard FileManager.default.isExecutableFile(atPath: wezTerm) else {
          throw LauncherError.bundledTerminalNotFound
@@ -78,7 +93,7 @@ private enum NeovimLauncher {
          )
       }
 
-      let shellCommand = "exec \(shellQuoted(neovim)) \"$@\""
+      let shellCommand = "exec \(shellQuoted(neovim)) --listen \(shellQuoted(serverAddress)) \"$@\""
       return LaunchRequest(
          executable: wezTerm,
          arguments: [
@@ -89,21 +104,68 @@ private enum NeovimLauncher {
       )
    }
 
-   static func launch(paths: [String], terminationHandler: @escaping (Process) -> Void) throws -> Process {
-      let request = try makeRequest(paths: paths)
+   static func launch(paths: [String], terminationHandler: @escaping (Process) -> Void) throws -> ManagedSession {
+      let serverDirectory = URL(fileURLWithPath: "/private/tmp", isDirectory: true)
+         .appendingPathComponent("neovim-app-\(UUID().uuidString)", isDirectory: true)
+      do {
+         try FileManager.default.createDirectory(
+            at: serverDirectory,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+         )
+      } catch {
+         throw LauncherError.serverUnavailable
+      }
+      let serverAddress = serverDirectory.appendingPathComponent("nvim.sock").path
+
+      do {
+         let request = try makeRequest(paths: paths, serverAddress: serverAddress)
+         let process = Process()
+         process.executableURL = URL(fileURLWithPath: request.executable)
+         var arguments = request.arguments
+         arguments.insert("--always-new-process", at: 1)
+         process.arguments = arguments
+         process.currentDirectoryURL = URL(fileURLWithPath: request.workingDirectory)
+         var environment = ProcessInfo.processInfo.environment
+         environment["NEOVIM_APP_SINGLE_SESSION"] = "1"
+         environment["WEZTERM_SINGLE_SESSION_MODE"] = "1"
+         environment["NEOVIM_APP_SERVER_ADDRESS"] = serverAddress
+         process.environment = environment
+         process.terminationHandler = terminationHandler
+         try process.run()
+         return ManagedSession(process: process, serverDirectory: serverDirectory)
+      } catch {
+         removeServerDirectory(serverDirectory)
+         throw error
+      }
+   }
+
+   static func removeServerDirectory(_ directory: URL) {
+      guard directory.deletingLastPathComponent().path == "/private/tmp",
+            directory.lastPathComponent.hasPrefix("neovim-app-") else {
+         return
+      }
+      try? FileManager.default.removeItem(at: directory)
+   }
+
+   static func remoteOpen(paths: [String], serverAddress: String) -> Bool {
+      guard let neovim = firstExecutable(in: neovimCandidates), !paths.isEmpty else {
+         return false
+      }
+
+      let files = paths.map { "fnameescape(\(vimQuoted($0)))" }.joined(separator: " . ' ' . ")
       let process = Process()
-      process.executableURL = URL(fileURLWithPath: request.executable)
-      var arguments = request.arguments
-      arguments.insert("--always-new-process", at: 1)
-      process.arguments = arguments
-      process.currentDirectoryURL = URL(fileURLWithPath: request.workingDirectory)
-      var environment = ProcessInfo.processInfo.environment
-      environment["NEOVIM_APP_SINGLE_SESSION"] = "1"
-      environment["WEZTERM_SINGLE_SESSION_MODE"] = "1"
-      process.environment = environment
-      process.terminationHandler = terminationHandler
-      try process.run()
-      return process
+      process.executableURL = URL(fileURLWithPath: neovim)
+      process.arguments = ["--server", serverAddress, "--remote-expr", "execute('drop ' . \(files))"]
+      process.standardOutput = FileHandle.nullDevice
+      process.standardError = FileHandle.nullDevice
+      do {
+         try process.run()
+         process.waitUntilExit()
+         return process.terminationStatus == 0
+      } catch {
+         return false
+      }
    }
 
    static func workspaceDirectory(for path: String?) -> String {
@@ -125,12 +187,18 @@ private enum NeovimLauncher {
    private static func shellQuoted(_ value: String) -> String {
       "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
    }
+
+   private static func vimQuoted(_ value: String) -> String {
+      "'" + value.replacingOccurrences(of: "'", with: "''") + "'"
+   }
 }
 
 private final class AppDelegate: NSObject, NSApplicationDelegate {
    private var pendingPaths: [String] = []
    private var startupScheduled = false
-   private var managedProcesses: [Int32: Process] = [:]
+   private var remoteDeliveryActive = false
+   private var remoteDeliveryFailures = 0
+   private var managedSessions: [Int32: ManagedSession] = [:]
 
    func applicationDidFinishLaunching(_ notification: Notification) {
       scheduleStartup()
@@ -138,7 +206,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
    func application(_ application: NSApplication, open urls: [URL]) {
       pendingPaths.append(contentsOf: urls.filter(\.isFileURL).map(\.path))
-      scheduleStartup()
+      if currentSession() != nil {
+         scheduleRemoteDelivery()
+      } else {
+         scheduleStartup()
+      }
    }
 
    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -150,26 +222,39 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
    }
 
    private func focusExistingSession() -> Bool {
-      guard let process = managedProcesses.values
-         .filter(\.isRunning)
-         .max(by: { $0.processIdentifier < $1.processIdentifier }) else {
+      guard let session = currentSession() else {
          return false
       }
 
       // The launcher is an accessory app. Let Launch Services finish its
       // reopen event before activating the regular terminal app.
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
-         self?.focusWezTerm(processIdentifier: process.processIdentifier, remainingAttempts: 15)
+         self?.focusWezTerm(processIdentifier: session.process.processIdentifier, remainingAttempts: 15)
       }
       return true
    }
 
+   private func currentSession() -> ManagedSession? {
+      managedSessions.values
+         .filter { $0.process.isRunning }
+         .max(by: { $0.process.processIdentifier < $1.process.processIdentifier })
+   }
+
    private func scheduleStartup() {
       guard !startupScheduled else { return }
+      if currentSession() != nil {
+         scheduleRemoteDelivery()
+         return
+      }
       startupScheduled = true
 
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak self] in
          guard let self else { return }
+         if self.currentSession() != nil {
+            self.startupScheduled = false
+            self.scheduleRemoteDelivery()
+            return
+         }
          let paths = self.pendingPaths
          self.pendingPaths.removeAll()
          self.launch(paths: paths)
@@ -178,20 +263,72 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
    private func launch(paths: [String]) {
       do {
-         let process = try NeovimLauncher.launch(paths: paths) { [weak self] process in
+         let session = try NeovimLauncher.launch(paths: paths) { [weak self] process in
             DispatchQueue.main.async {
-               self?.managedProcessDidTerminate(process)
+               self?.managedSessionDidTerminate(process)
             }
          }
-         managedProcesses[process.processIdentifier] = process
+         managedSessions[session.process.processIdentifier] = session
+         remoteDeliveryFailures = 0
          DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
-            self?.focusWezTerm(processIdentifier: process.processIdentifier, remainingAttempts: 15)
+            self?.focusWezTerm(processIdentifier: session.process.processIdentifier, remainingAttempts: 15)
          }
       } catch LauncherError.yaziNotFound {
          chooseNewWorkspace()
       } catch {
          show(error: error)
          finishLaunchCycle()
+      }
+   }
+
+   private func scheduleRemoteDelivery(after delay: TimeInterval = 0) {
+      guard !remoteDeliveryActive, !pendingPaths.isEmpty else { return }
+      guard let session = currentSession() else {
+         scheduleStartup()
+         return
+      }
+      remoteDeliveryActive = true
+
+      DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+         guard let self else { return }
+         let processIdentifier = session.process.processIdentifier
+         guard let current = self.currentSession(), current.process.processIdentifier == processIdentifier else {
+            self.remoteDeliveryActive = false
+            self.scheduleStartup()
+            return
+         }
+         // The first launch may still be in Yazi. Keep the file request until Nvim starts.
+         guard FileManager.default.fileExists(atPath: current.serverAddress) else {
+            self.remoteDeliveryActive = false
+            self.scheduleRemoteDelivery(after: 0.5)
+            return
+         }
+
+         let paths = self.pendingPaths
+         self.pendingPaths.removeAll()
+         DispatchQueue.global(qos: .userInitiated).async {
+            let opened = NeovimLauncher.remoteOpen(paths: paths, serverAddress: current.serverAddress)
+            DispatchQueue.main.async { [weak self] in
+               guard let self else { return }
+               self.remoteDeliveryActive = false
+               if opened {
+                  self.remoteDeliveryFailures = 0
+                  self.focusWezTerm(processIdentifier: processIdentifier, remainingAttempts: 15)
+                  self.scheduleRemoteDelivery()
+               } else if self.currentSession()?.process.processIdentifier != processIdentifier {
+                  self.pendingPaths.insert(contentsOf: paths, at: 0)
+                  self.scheduleStartup()
+               } else if self.remoteDeliveryFailures < 3 {
+                  self.remoteDeliveryFailures += 1
+                  self.pendingPaths.insert(contentsOf: paths, at: 0)
+                  self.scheduleRemoteDelivery(after: 0.5)
+               } else {
+                  self.remoteDeliveryFailures = 0
+                  self.show(error: LauncherError.remoteOpenFailed)
+                  self.scheduleRemoteDelivery()
+               }
+            }
+         }
       }
    }
 
@@ -217,22 +354,32 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
       }
    }
 
-   private func managedProcessDidTerminate(_ process: Process) {
-      managedProcesses.removeValue(forKey: process.processIdentifier)
-      terminateIfIdle()
-   }
-
-   private func finishLaunchCycle() {
-      startupScheduled = false
-      if !pendingPaths.isEmpty {
+   private func managedSessionDidTerminate(_ process: Process) {
+      if let session = managedSessions.removeValue(forKey: process.processIdentifier) {
+         NeovimLauncher.removeServerDirectory(session.serverDirectory)
+      }
+      if !pendingPaths.isEmpty && !remoteDeliveryActive {
          scheduleStartup()
       } else {
          terminateIfIdle()
       }
    }
 
+   private func finishLaunchCycle() {
+      startupScheduled = false
+      if !pendingPaths.isEmpty {
+         if currentSession() != nil {
+            scheduleRemoteDelivery()
+         } else {
+            scheduleStartup()
+         }
+      } else {
+         terminateIfIdle()
+      }
+   }
+
    private func terminateIfIdle() {
-      if managedProcesses.isEmpty && !startupScheduled && pendingPaths.isEmpty {
+      if managedSessions.isEmpty && !startupScheduled && !remoteDeliveryActive && pendingPaths.isEmpty {
          NSApplication.shared.terminate(nil)
       }
    }
@@ -271,7 +418,7 @@ let commandLine = Array(CommandLine.arguments.dropFirst())
 if let dryRunIndex = commandLine.firstIndex(of: "--dry-run") {
    let paths = Array(commandLine.dropFirst(dryRunIndex + 1))
    do {
-      let request = try NeovimLauncher.makeRequest(paths: paths)
+      let request = try NeovimLauncher.makeRequest(paths: paths, serverAddress: "/private/tmp/neovim-app-dry-run.sock")
       let data = try JSONEncoder().encode(request)
       print(String(decoding: data, as: UTF8.self))
       exit(EXIT_SUCCESS)
