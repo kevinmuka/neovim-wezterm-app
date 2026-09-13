@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>it</string>
 	<key>CFBundleDisplayName</key>
-	<string>Neovim Terminal</string>
+	<string>Neovim</string>
 	<key>CFBundleExecutable</key>
 	<string>wezterm-gui</string>
 	<key>CFBundleIdentifier</key>
@@ -13,17 +13,17 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Neovim Terminal</string>
+	<string>Neovim</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0</string>
+	<string>2.10</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>13</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>12.0</string>
-	<key>LSUIElement</key>
-	<true/>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSRequiresAquaSystemAppearance</key>

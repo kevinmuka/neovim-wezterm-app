@@ -1,10 +1,17 @@
 # Neovim.app per macOS
 
-Un launcher macOS che apre Neovim in una finestra WezTerm dedicata. Il launcher
-resta nel Dock finché la sessione è aperta e riporta in primo piano la sessione
-esistente quando si fa clic di nuovo sulla sua icona. Il terminale incorporato
-usa un helper privato senza una seconda icona WezTerm nel Dock; WezTerm avviato
+Un launcher macOS che apre Neovim in una finestra WezTerm dedicata. Il terminale
+incorporato è l'unica app visibile nel Dock e nella barra dei menu, con nome e
+icona Neovim. Facendo clic sulla sua icona si torna alla sessione esistente;
+anche riaprire `Neovim.app` la riporta in primo piano. Il launcher resta dietro
+le quinte e termina quando si chiude l'ultima sessione. WezTerm avviato
 normalmente rimane un'app indipendente.
+
+Solo nella sessione Neovim, il menu e il Dock non offrono azioni per creare tab,
+finestre o split, collegarsi ad altri domini o aprire il launcher dei comandi.
+Le scorciatoie corrispondenti sono disattivate; chiudere la sessione resta
+possibile. Il fork applica il blocco anche all'esecuzione di eventuali voci
+residue del menu.
 
 All'avvio senza file, il launcher apre Yazi per scegliere una cartella. `Invio`
 conferma, mentre `q`, `Q` ed `Esc` annullano. Il picker eredita la configurazione
@@ -17,10 +24,10 @@ l'[integrazione Neovim](integrations/neovim/workspace.lua).
 - macOS e Xcode Command Line Tools (`xcrun`, `swiftc`, `codesign`).
 - Neovim e Yazi installati in `/opt/homebrew/bin` o `/usr/local/bin`.
 - Una build `wezterm-gui` del branch
-  [`tab-config-overrides`](https://github.com/03kev/wezterm/tree/tab-config-overrides)
-  del fork WezTerm. Il branch contiene l'opzione
-  `WEZTERM_MACOS_ACTIVATION_POLICY=accessory` introdotta dal commit
-  [`53b67a7d1`](https://github.com/03kev/wezterm/commit/53b67a7d1578821c4a8cb167a00f2cfee55cd59e).
+  [`neovim-app`](https://github.com/03kev/wezterm/tree/neovim-app)
+  del fork WezTerm. La build dedicata usa una propria identità macOS: il
+  launcher è un'app accessory, mentre il terminale è un'app regular chiamata
+  Neovim. Non serve impostare `WEZTERM_MACOS_ACTIVATION_POLICY=accessory`.
 - Per la compilazione dell'app, le risorse di una `WezTerm.app` installata in
   `/Applications`, oppure un'altra directory di risorse indicata esplicitamente.
 
@@ -30,11 +37,15 @@ Clona e compila il fork WezTerm seguendo le sue istruzioni per macOS. Per
 esempio, dopo aver predisposto Rust e le dipendenze richieste dal fork:
 
 ```sh
-git clone --branch tab-config-overrides --recurse-submodules \
+git clone --branch neovim-app --recurse-submodules \
   https://github.com/03kev/wezterm.git wezterm-fork
 cd wezterm-fork
 cargo build --release -p wezterm-gui
 ```
+
+Se parti invece dal branch `tab-config-overrides`, applica prima della build
+[`wezterm-single-session-menu.patch`](patches/wezterm-single-session-menu.patch).
+Il branch `neovim-app` contiene già queste modifiche e non richiede la patch.
 
 Poi, dalla radice di questa repository:
 
@@ -45,6 +56,7 @@ NEOVIM_WEZTERM_GUI="/percorso/a/wezterm-fork/target/release/wezterm-gui" \
 
 Se `WezTerm.app` non è in `/Applications`, imposta anche
 `NEOVIM_WEZTERM_RESOURCES` sulla sua directory `Contents/Resources`.
+Lo script rifiuta un binario WezTerm che non contiene il filtro del menu.
 
 Lo script genera `outputs/Neovim.app` e `outputs/Neovim.zip`, li firma localmente
 con una firma ad hoc e non li include in Git. L'app non è notarizzata da Apple.
@@ -81,10 +93,9 @@ dipendenze: lo script inserisce la licenza MIT di WezTerm nell'helper.
 Questa repository non dichiara ancora una licenza per il codice del launcher;
 sceglila prima di consentire a terzi di riutilizzarlo.
 
-Per pubblicare il commit iniziale, crea una repository vuota sul tuo servizio
-Git, poi dalla radice di questa cartella esegui:
+Per pubblicare i commit, dopo aver configurato `origin`, dalla radice di questa
+cartella esegui:
 
 ```sh
-git remote add origin <URL-della-tua-repository>
 git push -u origin main
 ```

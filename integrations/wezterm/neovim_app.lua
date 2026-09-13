@@ -5,6 +5,10 @@ local function is_blocked(binding, wezterm)
    return action:find("Spawn", 1, true) ~= nil
       or action:find("Split", 1, true) ~= nil
       or action:find("ActivateCommandPalette", 1, true) ~= nil
+      or action:find("ShowLauncher", 1, true) ~= nil
+      or action:find("AttachDomain", 1, true) ~= nil
+      or action:find("DetachDomain", 1, true) ~= nil
+      or action:find("SwitchToWorkspace", 1, true) ~= nil
 end
 
 local function is_enabled()

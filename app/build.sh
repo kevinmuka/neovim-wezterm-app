@@ -18,11 +18,11 @@ WEZTERM_GUI_BINARY=${NEOVIM_WEZTERM_GUI:-}
 WEZTERM_RESOURCES_DIR=${NEOVIM_WEZTERM_RESOURCES:-/Applications/WezTerm.app/Contents/Resources}
 
 if [[ -z "$WEZTERM_GUI_BINARY" || ! -x "$WEZTERM_GUI_BINARY" ]]; then
-   echo "Imposta NEOVIM_WEZTERM_GUI sul binario wezterm-gui del branch tab-config-overrides del fork 03kev/wezterm." >&2
+   echo "Imposta NEOVIM_WEZTERM_GUI sul binario wezterm-gui del branch neovim-app del fork 03kev/wezterm." >&2
    exit 1
 fi
-if ! /usr/bin/grep -aFq "WEZTERM_MACOS_ACTIVATION_POLICY" "$WEZTERM_GUI_BINARY"; then
-   echo "Il binario wezterm-gui non contiene l'override macOS richiesto dal launcher." >&2
+if ! /usr/bin/grep -aFq "WEZTERM_SINGLE_SESSION_MODE" "$WEZTERM_GUI_BINARY"; then
+   echo "Il binario wezterm-gui non include il filtro dei menu per la sessione Neovim." >&2
    exit 1
 fi
 if [[ ! -d "$WEZTERM_RESOURCES_DIR" ]]; then
@@ -30,7 +30,10 @@ if [[ ! -d "$WEZTERM_RESOURCES_DIR" ]]; then
    exit 1
 fi
 
-mkdir -p "$BUILD_DIR" "$OUTPUT_DIR" "$MODULE_CACHE_DIR"
+mkdir -p "$BUILD_DIR" "$OUTPUT_DIR"
+# Clang stores absolute paths in this cache; a moved checkout needs a fresh one.
+rm -rf "$MODULE_CACHE_DIR"
+mkdir -p "$MODULE_CACHE_DIR"
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR" "$WEZTERM_HELPER_MACOS" "$WEZTERM_HELPER_RESOURCES"
 
@@ -57,6 +60,7 @@ xcrun swiftc -O -whole-module-optimization -target x86_64-apple-macosx12.0 \
 /bin/cp "$WEZTERM_GUI_BINARY" "$WEZTERM_HELPER_MACOS/wezterm-gui"
 /bin/chmod +x "$WEZTERM_HELPER_MACOS/wezterm-gui"
 /bin/cp -R "$WEZTERM_RESOURCES_DIR/." "$WEZTERM_HELPER_RESOURCES/"
+/bin/cp "$SCRIPT_DIR/AppIcon.icns" "$WEZTERM_HELPER_RESOURCES/AppIcon.icns"
 /bin/cp "$SCRIPT_DIR/WezTerm-LICENSE.md" "$WEZTERM_HELPER_RESOURCES/WezTerm-LICENSE.md"
 /usr/bin/codesign --force --sign - "$WEZTERM_HELPER_APP"
 /usr/bin/codesign --force --deep --sign - "$APP_DIR"

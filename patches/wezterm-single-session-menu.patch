@@ -1,0 +1,215 @@
+diff --git a/config/src/keyassignment.rs b/config/src/keyassignment.rs
+index efd36fd89..27d67bb62 100644
+--- a/config/src/keyassignment.rs
++++ b/config/src/keyassignment.rs
+@@ -649,6 +649,55 @@ pub enum KeyAssignment {
+ }
+ impl_lua_conversion_dynamic!(KeyAssignment);
+ 
++impl KeyAssignment {
++    /// Actions that can escape a terminal session intended to use one window,
++    /// one tab and one pane. Closing the existing pane/tab remains allowed.
++    pub fn is_disallowed_in_single_session(&self) -> bool {
++        match self {
++            Self::SpawnTab(_)
++            | Self::SpawnWindow
++            | Self::SpawnCommandInNewTab(_)
++            | Self::SpawnCommandInNewWindow(_)
++            | Self::SplitHorizontal(_)
++            | Self::SplitVertical(_)
++            | Self::SplitPane(_)
++            | Self::ShowLauncher
++            | Self::ShowLauncherArgs(_)
++            | Self::ActivateCommandPalette
++            | Self::AttachDomain(_)
++            | Self::DetachDomain(_)
++            | Self::SwitchToWorkspace { .. }
++            | Self::SwitchWorkspaceRelative(_) => true,
++            Self::PaneSelect(args) => matches!(
++                args.mode,
++                PaneSelectMode::MoveToNewTab | PaneSelectMode::MoveToNewWindow
++            ),
++            Self::Multiple(actions) => actions.iter().any(Self::is_disallowed_in_single_session),
++            _ => false,
++        }
++    }
++}
++
++#[cfg(test)]
++mod single_session_tests {
++    use super::{KeyAssignment, SpawnCommand, SpawnTabDomain};
++
++    #[test]
++    fn blocks_session_creation_but_keeps_closing_available() {
++        assert!(KeyAssignment::SpawnWindow.is_disallowed_in_single_session());
++        assert!(KeyAssignment::SpawnTab(SpawnTabDomain::DefaultDomain)
++            .is_disallowed_in_single_session());
++        assert!(KeyAssignment::SplitVertical(SpawnCommand::default())
++            .is_disallowed_in_single_session());
++        assert!(KeyAssignment::ActivateCommandPalette.is_disallowed_in_single_session());
++        assert!(KeyAssignment::ShowLauncher.is_disallowed_in_single_session());
++        assert!(!KeyAssignment::CloseCurrentTab { confirm: true }
++            .is_disallowed_in_single_session());
++        assert!(!KeyAssignment::CloseCurrentPane { confirm: true }
++            .is_disallowed_in_single_session());
++    }
++}
++
+ #[derive(Debug, Clone, PartialEq, FromDynamic, ToDynamic)]
+ pub struct SplitPane {
+     pub direction: PaneDirection,
+diff --git a/wezterm-gui/src/commands.rs b/wezterm-gui/src/commands.rs
+index 581597cd0..41870ab16 100644
+--- a/wezterm-gui/src/commands.rs
++++ b/wezterm-gui/src/commands.rs
+@@ -362,6 +362,10 @@ impl CommandDef {
+             }
+         }
+ 
++        if std::env::var("WEZTERM_SINGLE_SESSION_MODE").as_deref() == Ok("1") {
++            result.retain(|cmd| !cmd.action.is_disallowed_in_single_session());
++        }
++
+         result
+     }
+ 
+diff --git a/wezterm-gui/src/frontend.rs b/wezterm-gui/src/frontend.rs
+index 35fd2b333..47c51857e 100644
+--- a/wezterm-gui/src/frontend.rs
++++ b/wezterm-gui/src/frontend.rs
+@@ -272,6 +272,11 @@ impl GuiFrontEnd {
+                 .detach();
+             }
+             ApplicationEvent::PerformKeyAssignment(action) => {
++                if std::env::var("WEZTERM_SINGLE_SESSION_MODE").as_deref() == Ok("1")
++                    && action.is_disallowed_in_single_session()
++                {
++                    return;
++                }
+                 // We should only get here when there are no windows open
+                 // and the user picks an action from the menubar.
+                 // This is not currently possible, but could be in the
+diff --git a/wezterm-gui/src/termwindow/mod.rs b/wezterm-gui/src/termwindow/mod.rs
+index 951ffe54a..963297c90 100644
+--- a/wezterm-gui/src/termwindow/mod.rs
++++ b/wezterm-gui/src/termwindow/mod.rs
+@@ -2735,6 +2735,12 @@ impl TermWindow {
+     ) -> anyhow::Result<PerformAssignmentResult> {
+         use KeyAssignment::*;
+ 
++        if std::env::var("WEZTERM_SINGLE_SESSION_MODE").as_deref() == Ok("1")
++            && assignment.is_disallowed_in_single_session()
++        {
++            return Ok(PerformAssignmentResult::Handled);
++        }
++
+         if let Some(modal) = self.get_modal() {
+             if modal.perform_assignment(assignment, self) {
+                 return Ok(PerformAssignmentResult::Handled);
+diff --git a/window/src/os/macos/app.rs b/window/src/os/macos/app.rs
+index 3f8dbb71c..834e0048b 100644
+--- a/window/src/os/macos/app.rs
++++ b/window/src/os/macos/app.rs
+@@ -4,7 +4,8 @@ use crate::macos::{nsstring, nsstring_to_str};
+ use crate::menu::{Menu, MenuItem};
+ use crate::{ApplicationEvent, Connection};
+ use cocoa::appkit::NSApplicationTerminateReply;
+-use cocoa::base::id;
++use cocoa::appkit::NSApp;
++use cocoa::base::{id, nil};
+ use cocoa::foundation::NSInteger;
+ use config::keyassignment::KeyAssignment;
+ use config::WindowCloseConfirmation;
+@@ -15,6 +16,10 @@ use objc::*;
+ 
+ const CLS_NAME: &str = "WezTermAppDelegate";
+ 
++fn single_session_mode() -> bool {
++    std::env::var("WEZTERM_SINGLE_SESSION_MODE").as_deref() == Ok("1")
++}
++
+ extern "C" fn application_should_terminate(
+     _self: &mut Object,
+     _sel: Sel,
+@@ -83,7 +88,7 @@ extern "C" fn application_open_untitled_file(
+     let launched: BOOL = unsafe { *this.get_ivar("launched") };
+     log::debug!("application_open_untitled_file launched={launched}");
+     if let Some(conn) = Connection::get() {
+-        if launched == YES {
++        if launched == YES && !single_session_mode() {
+             conn.dispatch_app_event(ApplicationEvent::PerformKeyAssignment(
+                 KeyAssignment::SpawnWindow,
+             ));
+@@ -93,6 +98,31 @@ extern "C" fn application_open_untitled_file(
+     NO
+ }
+ 
++extern "C" fn application_should_handle_reopen(
++    _self: &mut Object,
++    _sel: Sel,
++    app: *mut Object,
++    _has_visible_windows: BOOL,
++) -> BOOL {
++    if !single_session_mode() {
++        return YES;
++    }
++
++    unsafe {
++        let windows: id = msg_send![app, orderedWindows];
++        let window: id = msg_send![windows, firstObject];
++        if window != nil {
++            let miniaturized: BOOL = msg_send![window, isMiniaturized];
++            if miniaturized == YES {
++                let () = msg_send![window, deminiaturize: nil];
++            }
++            let () = msg_send![NSApp(), activateIgnoringOtherApps: YES];
++            let () = msg_send![window, makeKeyAndOrderFront: nil];
++        }
++    }
++    NO
++}
++
+ extern "C" fn wezterm_perform_key_assignment(
+     _self: &mut Object,
+     _sel: Sel,
+@@ -104,6 +134,9 @@ extern "C" fn wezterm_perform_key_assignment(
+     log::debug!("wezterm_perform_key_assignment {action:?}",);
+     match action {
+         Some(RepresentedItem::KeyAssignment(action)) => {
++            if single_session_mode() && action.is_disallowed_in_single_session() {
++                return;
++            }
+             if let Some(conn) = Connection::get() {
+                 conn.dispatch_app_event(ApplicationEvent::PerformKeyAssignment(action));
+             }
+@@ -134,11 +167,13 @@ extern "C" fn application_dock_menu(
+     _app: *mut Object,
+ ) -> *mut Object {
+     let dock_menu = Menu::new_with_title("");
+-    let new_window_item =
+-        MenuItem::new_with("New Window", Some(sel!(weztermPerformKeyAssignment:)), "");
+-    new_window_item
+-        .set_represented_item(RepresentedItem::KeyAssignment(KeyAssignment::SpawnWindow));
+-    dock_menu.add_item(&new_window_item);
++    if !single_session_mode() {
++        let new_window_item =
++            MenuItem::new_with("New Window", Some(sel!(weztermPerformKeyAssignment:)), "");
++        new_window_item
++            .set_represented_item(RepresentedItem::KeyAssignment(KeyAssignment::SpawnWindow));
++        dock_menu.add_item(&new_window_item);
++    }
+     dock_menu.autorelease()
+ }
+ 
+@@ -180,6 +215,11 @@ fn get_class() -> &'static Class {
+                 application_open_untitled_file
+                     as extern "C" fn(&mut Object, Sel, *mut Object) -> BOOL,
+             );
++            cls.add_method(
++                sel!(applicationShouldHandleReopen:hasVisibleWindows:),
++                application_should_handle_reopen
++                    as extern "C" fn(&mut Object, Sel, *mut Object, BOOL) -> BOOL,
++            );
+         }
+ 
+         cls.register()
