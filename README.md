@@ -1,21 +1,20 @@
 # Neovim.app per macOS
 
-Un launcher macOS che apre Neovim in una finestra WezTerm dedicata. Il terminale
-incorporato è l'unica app visibile nel Dock e nella barra dei menu, con nome e
-icona Neovim. Facendo clic sulla sua icona si torna alla sessione esistente;
-anche riaprire `Neovim.app` la riporta in primo piano. Il launcher resta dietro
-le quinte e termina quando si chiude l'ultima sessione. WezTerm avviato
-normalmente rimane un'app indipendente.
+Un launcher macOS che apre Neovim in una finestra WezTerm dedicata. `Neovim.app`
+è l'unica app visibile nel Dock, con nome e icona Neovim: facendo clic sulla sua
+icona si torna alla sessione esistente. Il terminale incorporato gestisce la
+finestra come app accessoria e non aggiunge un'altra icona al Dock né una propria
+barra dei menu. Il launcher termina quando si chiude l'ultima sessione.
+WezTerm avviato normalmente rimane un'app indipendente.
 
 Aprire un file tramite `Neovim.app` mentre una sessione è già attiva riutilizza
 quella sessione, senza creare un'altra finestra. Se Yazi sta ancora scegliendo
 il workspace, il file resta in attesa finché Neovim non si avvia.
 
-Solo nella sessione Neovim, il menu e il Dock non offrono azioni per creare tab,
-finestre o split, collegarsi ad altri domini o aprire il launcher dei comandi.
-Le scorciatoie corrispondenti sono disattivate; chiudere la sessione resta
-possibile. Il fork applica il blocco anche all'esecuzione di eventuali voci
-residue del menu.
+Solo nella sessione Neovim, le scorciatoie per creare tab, finestre o split,
+collegarsi ad altri domini o aprire il launcher dei comandi sono disattivate;
+chiudere la sessione resta possibile. Il fork blocca anche eventuali comandi
+equivalenti eseguiti da voci di menu residue.
 
 All'avvio senza file, il launcher apre Yazi per scegliere una cartella. `Invio`
 conferma, mentre `q`, `Q` ed `Esc` annullano. Il picker eredita la configurazione
@@ -28,10 +27,11 @@ l'[integrazione Neovim](integrations/neovim/workspace.lua).
 - macOS e Xcode Command Line Tools (`xcrun`, `swiftc`, `codesign`).
 - Neovim e Yazi installati in `/opt/homebrew/bin` o `/usr/local/bin`.
 - Una build `wezterm-gui` del branch
-  [`neovim-app`](https://github.com/03kev/wezterm/tree/neovim-app)
-  del fork WezTerm. La build dedicata usa una propria identità macOS: il
-  launcher è un'app accessory, mentre il terminale è un'app regular chiamata
-  Neovim. Non serve impostare `WEZTERM_MACOS_ACTIVATION_POLICY=accessory`.
+  [`neovim-app`](https://github.com/kevinmuka/wezterm/tree/neovim-app)
+  del fork WezTerm. Il launcher è un'app regular, mentre il terminale incluso
+  è un'app accessory. Il launcher imposta anche
+  `WEZTERM_MACOS_ACTIVATION_POLICY=accessory` quando avvia WezTerm, perché il
+  terminale applica una propria policy di attivazione a runtime.
 - Per la compilazione dell'app, le risorse di una `WezTerm.app` installata in
   `/Applications`, oppure un'altra directory di risorse indicata esplicitamente.
 
@@ -42,7 +42,7 @@ esempio, dopo aver predisposto Rust e le dipendenze richieste dal fork:
 
 ```sh
 git clone --branch neovim-app --recurse-submodules \
-  https://github.com/03kev/wezterm.git wezterm-fork
+  https://github.com/kevinmuka/wezterm.git wezterm-fork
 cd wezterm-fork
 cargo build --release -p wezterm-gui
 ```

@@ -18,7 +18,7 @@ WEZTERM_GUI_BINARY=${NEOVIM_WEZTERM_GUI:-}
 WEZTERM_RESOURCES_DIR=${NEOVIM_WEZTERM_RESOURCES:-/Applications/WezTerm.app/Contents/Resources}
 
 if [[ -z "$WEZTERM_GUI_BINARY" || ! -x "$WEZTERM_GUI_BINARY" ]]; then
-   echo "Imposta NEOVIM_WEZTERM_GUI sul binario wezterm-gui del branch neovim-app del fork 03kev/wezterm." >&2
+   echo "Imposta NEOVIM_WEZTERM_GUI sul binario wezterm-gui del branch neovim-app del fork kevinmuka/wezterm." >&2
    exit 1
 fi
 if ! /usr/bin/grep -aFq "WEZTERM_SINGLE_SESSION_MODE" "$WEZTERM_GUI_BINARY"; then

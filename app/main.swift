@@ -129,6 +129,7 @@ private enum NeovimLauncher {
          var environment = ProcessInfo.processInfo.environment
          environment["NEOVIM_APP_SINGLE_SESSION"] = "1"
          environment["WEZTERM_SINGLE_SESSION_MODE"] = "1"
+         environment["WEZTERM_MACOS_ACTIVATION_POLICY"] = "accessory"
          environment["NEOVIM_APP_SERVER_ADDRESS"] = serverAddress
          process.environment = environment
          process.terminationHandler = terminationHandler
@@ -226,8 +227,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
          return false
       }
 
-      // The launcher is an accessory app. Let Launch Services finish its
-      // reopen event before activating the regular terminal app.
+      // Let Launch Services finish the reopen event before activating the
+      // terminal window owned by the accessory helper.
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
          self?.focusWezTerm(processIdentifier: session.process.processIdentifier, remainingAttempts: 15)
       }
@@ -431,5 +432,5 @@ if let dryRunIndex = commandLine.firstIndex(of: "--dry-run") {
 let app = NSApplication.shared
 private let delegate = AppDelegate()
 app.delegate = delegate
-app.setActivationPolicy(.accessory)
+app.setActivationPolicy(.regular)
 app.run()
